@@ -235,6 +235,545 @@ ${bodyHTML}
     }
 }
 
+class ChatManager {
+    constructor(editorInstance) {
+        this.editor = editorInstance;
+        this.settings = editorInstance.settings;
+        this.state = editorInstance.state;
+        this.canvas = editorInstance.canvas;
+        this.conversationHistory = [];
+        this.isProcessing = false;
+        this.maxHistoryLength = 20;
+        
+        // DOM elements
+        this.chatPanel = document.getElementById('chat-panel');
+        this.chatMessages = document.getElementById('chat-messages');
+        this.chatInput = document.getElementById('chat-input');
+        this.chatCharCounter = document.getElementById('chat-char-counter');
+        this.btnSendMessage = document.getElementById('btn-send-message');
+        this.btnToggleChat = document.getElementById('btn-chat-toggle');
+        this.btnCollapseChat = document.getElementById('btn-collapse-chat');
+        this.btnCloseChat = document.getElementById('btn-close-chat');
+        
+        this.init();
+    }
+    
+    init() {
+        this.setupEventListeners();
+        this.updateCharCounter();
+    }
+    
+    setupEventListeners() {
+        // Chat toggle button
+        this.btnToggleChat.addEventListener('click', () => {
+            this.toggleChat();
+        });
+        
+        // Collapse and close buttons
+        this.btnCollapseChat.addEventListener('click', () => {
+            this.collapseChat();
+        });
+        
+        this.btnCloseChat.addEventListener('click', () => {
+            this.closeChat();
+        });
+        
+        // Send message button
+        this.btnSendMessage.addEventListener('click', () => {
+            this.sendMessage();
+        });
+        
+        // Chat input events
+        this.chatInput.addEventListener('input', () => {
+            this.updateCharCounter();
+        });
+        
+        this.chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.sendMessage();
+            }
+        });
+    }
+    
+    toggleChat() {
+        this.chatPanel.classList.toggle('collapsed');
+        
+        // Update button text based on panel state
+        if (this.chatPanel.classList.contains('collapsed')) {
+            this.btnToggleChat.textContent = 'AI Chat';
+        } else {
+            this.btnToggleChat.textContent = 'Hide Chat';
+        }
+    }
+    
+    collapseChat() {
+        this.chatPanel.classList.add('collapsed');
+        this.btnToggleChat.textContent = 'AI Chat';
+    }
+    
+    closeChat() {
+        this.chatPanel.classList.add('collapsed');
+        this.btnToggleChat.textContent = 'AI Chat';
+    }
+    
+    updateCharCounter() {
+        const length = this.chatInput.value.length;
+        const maxLength = 500;
+        this.chatCharCounter.textContent = `${length} / ${maxLength}`;
+        
+        // Update styling based on character count
+        this.chatCharCounter.classList.remove('warning', 'critical');
+        if (length > maxLength * 0.9) {
+            this.chatCharCounter.classList.add('critical');
+        } else if (length > maxLength * 0.8) {
+            this.chatCharCounter.classList.add('warning');
+        }
+    }
+    
+    formatUserMessage(text) {
+        return text.trim().substring(0, 500);
+    }
+    
+    async sendMessage() {
+        const message = this.formatUserMessage(this.chatInput.value);
+        
+        if (!message || this.isProcessing) {
+            return;
+        }
+        
+        // Check if API key is set
+        const apiKey = this.settings.getApiKeyFromStorage();
+        if (!apiKey) {
+            this.addErrorMessage('Please configure your OpenAI API key in Settings first.');
+            return;
+        }
+        
+        // Add user message to UI and history
+        this.addMessageToUI('user', message);
+        this.addMessageToHistory('user', message);
+        
+        // Clear input
+        this.chatInput.value = '';
+        this.updateCharCounter();
+        
+        // Disable input and show typing indicator
+        this.setInputState(false);
+        this.showTypingIndicator();
+        
+        try {
+            this.isProcessing = true;
+            
+            // Build system prompt
+            const systemPrompt = this.buildSystemPrompt();
+            
+            // Call OpenAI API
+            const response = await this.callOpenAI(systemPrompt, message);
+            
+            // Remove typing indicator
+            this.removeTypingIndicator();
+            
+            // Add AI response to UI and history
+            this.addMessageToUI('assistant', response);
+            this.addMessageToHistory('assistant', response);
+            
+            // Parse and apply changes
+            await this.parseAndApplyChanges(response);
+            
+        } catch (error) {
+            this.removeTypingIndicator();
+            console.error('Chat error:', error);
+            
+            let errorMessage = 'An error occurred while processing your request.';
+            if (error.message.includes('API key')) {
+                errorMessage = 'Invalid API key. Please check your OpenAI API key in Settings.';
+            } else if (error.message.includes('Rate limit')) {
+                errorMessage = 'Rate limit exceeded. Please wait a moment and try again.';
+            } else if (error.message.includes('Network')) {
+                errorMessage = 'Network error. Please check your connection and try again.';
+            }
+            
+            this.addErrorMessage(errorMessage);
+        } finally {
+            this.isProcessing = false;
+            this.setInputState(true);
+        }
+    }
+    
+    buildSystemPrompt() {
+        const canvasDescription = this.getCanvasDescription();
+        let basePrompt = `You are an AI assistant for a visual HTML editor. You help users modify their canvas design by changing styles, adding elements, and adjusting layouts.
+
+Current Canvas State:
+${canvasDescription}
+
+Instructions:
+- Respond with a brief acknowledgment followed by specific code modifications
+- Use this format for modifications:
+  * UPDATE #element-id { property: value; }
+  * ADD <element>content</element>
+  * DELETE #element-id
+  * SET-TEXT #element-id "New text content"
+- Only modify existing elements or add new ones
+- Keep CSS properties valid
+- Be specific and concise in your modifications`;
+
+        // We'll add custom system prompt when we have the settings
+        return basePrompt;
+    }
+    
+    getCanvasDescription() {
+        const elements = [];
+        const describeElement = (node, depth = 0) => {
+            const indent = '  '.repeat(depth);
+            let description = `${indent}- ${node.tag}`;
+            
+            if (node.id) description += ` #${node.id}`;
+            if (node.textContent) description += ` text: "${node.textContent.substring(0, 50)}"`;
+            if (node.styles && Object.keys(node.styles).length > 0) {
+                const styleKeys = Object.keys(node.styles).slice(0, 3);
+                description += ` styles: {${styleKeys.join(', ')}}`;
+            }
+            
+            elements.push(description);
+            
+            if (node.children) {
+                node.children.forEach(child => describeElement(child, depth + 1));
+            }
+        };
+        
+        describeElement(this.state.domTree);
+        return elements.join('\n');
+    }
+    
+    async callOpenAI(systemPrompt, userMessage) {
+        const settings = await this.settings.loadSettings();
+        const apiKey = this.settings.getApiKeyFromStorage();
+        
+        if (!apiKey) {
+            throw new Error('API key not configured');
+        }
+        
+        // Add custom system prompt from settings
+        let fullSystemPrompt = systemPrompt;
+        if (settings.systemPrompt && settings.systemPrompt.trim()) {
+            fullSystemPrompt += `\n\nCustom Instructions:\n${settings.systemPrompt}`;
+        }
+        
+        const response = await fetch('openai_proxy.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            },
+            cache: 'no-store',
+            body: JSON.stringify({
+                systemPrompt: fullSystemPrompt,
+                userMessage: userMessage,
+                model: settings.model || 'gpt-4o-mini',
+                maxTokens: settings.maxTokens || 2000,
+                temperature: settings.temperature || 0.7
+            })
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `HTTP ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Unknown error from OpenAI API');
+        }
+        
+        return result.data.response;
+    }
+    
+    async parseAndApplyChanges(aiResponse) {
+        // Parse AI response for commands
+        const lines = aiResponse.split('\n');
+        let appliedChanges = 0;
+        let updatedElements = [];
+        
+        for (const line of lines) {
+            const trimmedLine = line.trim();
+            
+            // UPDATE command: UPDATE #element-id { property: value; }
+            const updateMatch = trimmedLine.match(/^UPDATE\s+#(\w+)\s*\{([^}]+)\}/i);
+            if (updateMatch) {
+                const elementId = updateMatch[1];
+                const cssProperties = updateMatch[2];
+                
+                if (this.updateElementStyles(elementId, cssProperties)) {
+                    appliedChanges++;
+                    updatedElements.push(elementId);
+                }
+                continue;
+            }
+            
+            // SET-TEXT command: SET-TEXT #element-id "text content"
+            const textMatch = trimmedLine.match(/^SET-TEXT\s+#(\w+)\s+"([^"]+)"/i);
+            if (textMatch) {
+                const elementId = textMatch[1];
+                const textContent = textMatch[2];
+                
+                if (this.updateElementText(elementId, textContent)) {
+                    appliedChanges++;
+                    updatedElements.push(elementId);
+                }
+                continue;
+            }
+            
+            // DELETE command: DELETE #element-id
+            const deleteMatch = trimmedLine.match(/^DELETE\s+#(\w+)/i);
+            if (deleteMatch) {
+                const elementId = deleteMatch[1];
+                
+                if (this.deleteElementById(elementId)) {
+                    appliedChanges++;
+                }
+                continue;
+            }
+            
+            // ADD command: ADD <element>content</element>
+            const addMatch = trimmedLine.match(/^ADD\s+(<[^>]+>.*<\/[^>]+>)/i);
+            if (addMatch) {
+                const elementHTML = addMatch[1];
+                
+                if (this.addElementFromHTML(elementHTML)) {
+                    appliedChanges++;
+                }
+                continue;
+            }
+        }
+        
+        // Show success message
+        if (appliedChanges > 0) {
+            this.showSuccessMessage(`Applied ${appliedChanges} changes to your canvas.`);
+            
+            // Highlight updated elements
+            this.highlightElements(updatedElements);
+        } else {
+            // No changes applied, just acknowledge
+            this.showInfoMessage('I understand your request, but no code changes were detected. You can be more specific about what you want to modify.');
+        }
+    }
+    
+    updateElementStyles(elementId, cssProperties) {
+        const element = this.state.findElementById(elementId);
+        if (!element) return false;
+        
+        this.state.saveState();
+        
+        // Parse CSS properties
+        const properties = cssProperties.split(';').map(prop => prop.trim()).filter(prop => prop);
+        const styles = {};
+        
+        properties.forEach(prop => {
+            const colonIndex = prop.indexOf(':');
+            if (colonIndex > 0) {
+                const key = prop.substring(0, colonIndex).trim();
+                const value = prop.substring(colonIndex + 1).trim();
+                styles[key] = value;
+            }
+        });
+        
+        this.editor.updateElement(elementId, { styles }, false);
+        this.canvas.render(this.state); // Ensure canvas re-renders
+        return true;
+    }
+    
+    updateElementText(elementId, textContent) {
+        const element = this.state.findElementById(elementId);
+        if (!element) return false;
+        
+        this.state.saveState();
+        this.editor.updateElement(elementId, { textContent }, false);
+        this.canvas.render(this.state); // Ensure canvas re-renders
+        return true;
+    }
+    
+    deleteElementById(elementId) {
+        const element = this.state.findElementById(elementId);
+        if (!element || elementId === 'root-canvas') return false;
+        
+        this.state.saveState();
+        this.state.deleteElement(elementId);
+        this.canvas.render(this.state);
+        return true;
+    }
+    
+    addElementFromHTML(elementHTML) {
+        try {
+            // Create a temporary div to parse HTML
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = elementHTML;
+            const element = tempDiv.firstChild;
+            
+            if (!element || element.nodeType !== 1) return false;
+            
+            // Generate new ID for the element
+            const newId = 'el-' + Math.random().toString(36).substr(2, 9);
+            element.id = newId;
+            
+            // Create element object for EditorState
+            const newElement = {
+                tag: element.tagName.toLowerCase(),
+                id: newId,
+                styles: {},
+                children: [],
+                classes: [],
+                attributes: {}
+            };
+            
+            // Copy attributes
+            for (let attr of element.attributes) {
+                if (attr.name !== 'id') {
+                    newElement.attributes[attr.name] = attr.value;
+                }
+            }
+            
+            // Add text content if it's a text element
+            if (element.textContent && !['img', 'input', 'br', 'hr'].includes(element.tagName.toLowerCase())) {
+                newElement.textContent = element.textContent;
+            }
+            
+            this.state.saveState();
+            this.state.domTree.children.push(newElement);
+            this.canvas.render(this.state);
+            this.editor.selectElement(newId);
+            
+            return true;
+        } catch (error) {
+            console.error('Error adding element:', error);
+            return false;
+        }
+    }
+    
+    addMessageToHistory(role, content) {
+        const message = {
+            role: role,
+            content: content,
+            timestamp: Date.now()
+        };
+        
+        this.conversationHistory.push(message);
+        
+        // Limit history length
+        if (this.conversationHistory.length > this.maxHistoryLength) {
+            this.conversationHistory.shift();
+        }
+    }
+    
+    getConversationHistory() {
+        return this.conversationHistory;
+    }
+    
+    clearHistory() {
+        this.conversationHistory = [];
+        this.chatMessages.innerHTML = `
+            <div class="chat-welcome">
+                <p>Hello! I'm your AI assistant. I can help you modify your canvas design. Try asking me to:</p>
+                <ul>
+                    <li>Change colors or fonts</li>
+                    <li>Add new elements</li>
+                    <li>Modify layout and spacing</li>
+                    <li>Style existing elements</li>
+                </ul>
+                <p>Example: "Make the heading blue and increase its size"</p>
+            </div>
+        `;
+    }
+    
+    addMessageToUI(role, content) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `chat-message ${role}`;
+        
+        const bubble = document.createElement('div');
+        bubble.className = 'message-bubble';
+        bubble.textContent = content;
+        
+        messageDiv.appendChild(bubble);
+        this.chatMessages.appendChild(messageDiv);
+        
+        // Scroll to bottom
+        this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+    }
+    
+    addErrorMessage(content) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'error-message';
+        messageDiv.textContent = content;
+        
+        this.chatMessages.appendChild(messageDiv);
+        this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+    }
+    
+    addSuccessMessage(content) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'success-message';
+        messageDiv.textContent = content;
+        
+        this.chatMessages.appendChild(messageDiv);
+        this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+    }
+    
+    showInfoMessage(content) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'chat-message assistant';
+        messageDiv.innerHTML = `<div class="message-bubble">${content}</div>`;
+        
+        this.chatMessages.appendChild(messageDiv);
+        this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+    }
+    
+    showSuccessMessage(content) {
+        this.addSuccessMessage(content);
+    }
+    
+    showTypingIndicator() {
+        const typingDiv = document.createElement('div');
+        typingDiv.className = 'typing-indicator';
+        typingDiv.id = 'typing-indicator';
+        
+        typingDiv.innerHTML = `
+            <span>AI is thinking</span>
+            <div class="typing-dots">
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+            </div>
+        `;
+        
+        this.chatMessages.appendChild(typingDiv);
+        this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+    }
+    
+    removeTypingIndicator() {
+        const typingIndicator = document.getElementById('typing-indicator');
+        if (typingIndicator) {
+            typingIndicator.remove();
+        }
+    }
+    
+    setInputState(enabled) {
+        this.chatInput.disabled = !enabled;
+        this.btnSendMessage.disabled = !enabled;
+        
+        if (enabled) {
+            this.chatInput.focus();
+        }
+    }
+    
+    highlightElements(elementIds) {
+        // This would highlight elements in the canvas
+        // Implementation depends on how the canvas rendering works
+        // For now, we'll just show a general success message
+        console.log('Highlighted elements:', elementIds);
+    }
+}
+
 class EditorState {
     constructor() {
         this.domTree = {
@@ -657,6 +1196,7 @@ class Editor {
         this.propertiesPanel = new PropertiesPanel(this);
         this.settings = new Settings();
         this.exportManager = new ExportManager(this.state);
+        this.chatManager = new ChatManager(this);
         this.init();
     }
 
