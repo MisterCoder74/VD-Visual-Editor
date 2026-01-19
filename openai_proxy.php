@@ -75,22 +75,42 @@ if (strlen($userMessage) > 2000) {
 }
 
 // Get API key from Authorization header
-$headers = getallheaders();
 $apiKey = null;
+$authHeader = null;
 
-if (isset($headers['Authorization'])) {
-    $authHeader = $headers['Authorization'];
-    if (preg_match('/^Bearer\s+(.+)$/i', $authHeader, $matches)) {
-        $apiKey = trim($matches[1]);
+$headers = function_exists('getallheaders') ? getallheaders() : [];
+if (is_array($headers)) {
+    foreach ($headers as $k => $v) {
+        if (strtolower($k) === 'authorization') {
+            $authHeader = $v;
+            break;
+        }
     }
 }
 
+// Fallbacks for environments where getallheaders() doesn't include Authorization
+if (empty($authHeader)) {
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? null;
+}
+
+if (!empty($authHeader) && preg_match('/^Bearer\s+(.+)$/i', $authHeader, $matches)) {
+    $apiKey = trim($matches[1]);
+}
+
 if (empty($apiKey)) {
+    $headerKeys = is_array($headers) ? implode(', ', array_keys($headers)) : 'none';
+    $serverAuthPresent = implode(', ', array_filter([
+        isset($_SERVER['HTTP_AUTHORIZATION']) ? 'HTTP_AUTHORIZATION' : null,
+        isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION']) ? 'REDIRECT_HTTP_AUTHORIZATION' : null
+    ]));
+
+    error_log('openai_proxy: missing/invalid Authorization header. headers=[' . $headerKeys . '], serverAuthKeys=[' . $serverAuthPresent . ']');
+
     http_response_code(401);
     echo json_encode([
         'success' => false,
         'data' => null,
-        'error' => 'API key required in Authorization header'
+        'error' => 'API key not found. Please save Settings first'
     ]);
     exit();
 }
@@ -193,7 +213,7 @@ switch ($httpCode) {
         echo json_encode([
             'success' => false,
             'data' => null,
-            'error' => 'Invalid API key. Please check your OpenAI API key in settings.'
+            'error' => 'Invalid API key. Please check Settings'
         ]);
         break;
         

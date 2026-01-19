@@ -4,7 +4,10 @@
 
 class Settings {
     constructor() {
-        this.apiKeyStorageKey = 'vdve_apiKey';
+        // Primary storage key (expected by the app)
+        this.apiKeyStorageKey = 'openaiApiKey';
+        // Legacy key used by older versions
+        this.legacyApiKeyStorageKeys = ['vdve_apiKey'];
         this.defaults = {
             model: 'gpt-4o-mini',
             maxTokens: 2000,
@@ -70,14 +73,34 @@ class Settings {
     }
 
     getApiKeyFromStorage() {
-        return localStorage.getItem(this.apiKeyStorageKey) || '';
+        const primary = localStorage.getItem(this.apiKeyStorageKey);
+        if (primary && primary.trim()) return primary;
+
+        for (const legacyKey of this.legacyApiKeyStorageKeys) {
+            const legacyVal = localStorage.getItem(legacyKey);
+            if (legacyVal && legacyVal.trim()) {
+                // Migrate forward
+                localStorage.setItem(this.apiKeyStorageKey, legacyVal);
+                return legacyVal;
+            }
+        }
+
+        return '';
     }
 
     setApiKeyInStorage(key) {
-        if (key) {
-            localStorage.setItem(this.apiKeyStorageKey, key);
+        const trimmed = (key || '').trim();
+
+        if (trimmed) {
+            localStorage.setItem(this.apiKeyStorageKey, trimmed);
+            for (const legacyKey of this.legacyApiKeyStorageKeys) {
+                localStorage.setItem(legacyKey, trimmed);
+            }
         } else {
             localStorage.removeItem(this.apiKeyStorageKey);
+            for (const legacyKey of this.legacyApiKeyStorageKeys) {
+                localStorage.removeItem(legacyKey);
+            }
         }
     }
 
@@ -343,9 +366,9 @@ class ChatManager {
         }
         
         // Check if API key is set
-        const apiKey = this.settings.getApiKeyFromStorage();
+        const apiKey = localStorage.getItem('openaiApiKey') || this.settings.getApiKeyFromStorage();
         if (!apiKey) {
-            this.addErrorMessage('Please configure your OpenAI API key in Settings first.');
+            this.addErrorMessage('Please configure your API key in Settings');
             return;
         }
         
@@ -383,16 +406,41 @@ class ChatManager {
         } catch (error) {
             this.removeTypingIndicator();
             console.error('Chat error:', error);
-            
+
             let errorMessage = 'An error occurred while processing your request.';
-            if (error.message.includes('API key')) {
-                errorMessage = 'Invalid API key. Please check your OpenAI API key in Settings.';
-            } else if (error.message.includes('Rate limit')) {
-                errorMessage = 'Rate limit exceeded. Please wait a moment and try again.';
-            } else if (error.message.includes('Network')) {
-                errorMessage = 'Network error. Please check your connection and try again.';
+
+            switch (error.code) {
+                case 'MISSING_LOCAL_API_KEY':
+                    errorMessage = 'Please configure your API key in Settings';
+                    break;
+                case 'MISSING_AUTH_HEADER':
+                    errorMessage = 'API key not found. Please save Settings first';
+                    break;
+                case 'INVALID_API_KEY':
+                    errorMessage = 'Invalid API key. Please check Settings';
+                    break;
+                case 'RATE_LIMIT':
+                    errorMessage = 'Rate limit exceeded. Please wait a moment and try again.';
+                    break;
+                case 'NETWORK_ERROR':
+                    errorMessage = 'Network error. Please check your connection and try again.';
+                    break;
+                default: {
+                    const msg = typeof error.message === 'string' ? error.message : '';
+                    const msgLower = msg.toLowerCase();
+
+                    if (msgLower.includes('authorization header')) {
+                        errorMessage = 'API key not found. Please save Settings first';
+                    } else if (msgLower.includes('invalid api key') || (msgLower.includes('api key') && msgLower.includes('invalid'))) {
+                        errorMessage = 'Invalid API key. Please check Settings';
+                    } else if (msgLower.includes('rate limit')) {
+                        errorMessage = 'Rate limit exceeded. Please wait a moment and try again.';
+                    } else if (msgLower.includes('network')) {
+                        errorMessage = 'Network error. Please check your connection and try again.';
+                    }
+                }
             }
-            
+
             this.addErrorMessage(errorMessage);
         } finally {
             this.isProcessing = false;
@@ -448,45 +496,73 @@ Instructions:
     
     async callOpenAI(systemPrompt, userMessage) {
         const settings = await this.settings.loadSettings();
-        const apiKey = this.settings.getApiKeyFromStorage();
-        
+        const apiKey = localStorage.getItem('openaiApiKey') || this.settings.getApiKeyFromStorage();
+
         if (!apiKey) {
-            throw new Error('API key not configured');
+            const err = new Error('API key not configured');
+            err.code = 'MISSING_LOCAL_API_KEY';
+            throw err;
         }
-        
+
         // Add custom system prompt from settings
         let fullSystemPrompt = systemPrompt;
         if (settings.systemPrompt && settings.systemPrompt.trim()) {
             fullSystemPrompt += `\n\nCustom Instructions:\n${settings.systemPrompt}`;
         }
-        
-        const response = await fetch('openai_proxy.php', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-            },
-            cache: 'no-store',
-            body: JSON.stringify({
-                systemPrompt: fullSystemPrompt,
-                userMessage: userMessage,
-                model: settings.model || 'gpt-4o-mini',
-                maxTokens: settings.maxTokens || 2000,
-                temperature: settings.temperature || 0.7
-            })
-        });
-        
+
+        let response;
+        try {
+            response = await fetch('openai_proxy.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Cache-Control': 'no-store'
+                },
+                cache: 'no-store',
+                body: JSON.stringify({
+                    systemPrompt: fullSystemPrompt,
+                    userMessage: userMessage,
+                    model: settings.model || 'gpt-4o-mini',
+                    maxTokens: settings.maxTokens || 2000,
+                    temperature: settings.temperature || 0.7
+                })
+            });
+        } catch (e) {
+            const err = new Error('Network error');
+            err.code = 'NETWORK_ERROR';
+            throw err;
+        }
+
         if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || `HTTP ${response.status}`);
+            const errorData = await response.json().catch(() => null);
+            const msg = (errorData && errorData.error) ? String(errorData.error) : `HTTP ${response.status}`;
+
+            const err = new Error(msg);
+
+            if (response.status === 401) {
+                if (msg.toLowerCase().includes('authorization')) {
+                    err.code = 'MISSING_AUTH_HEADER';
+                } else {
+                    err.code = 'INVALID_API_KEY';
+                }
+            } else if (response.status === 429) {
+                err.code = 'RATE_LIMIT';
+            } else if (response.status >= 500) {
+                err.code = 'OPENAI_PROXY_ERROR';
+            }
+
+            throw err;
         }
-        
+
         const result = await response.json();
-        
+
         if (!result.success) {
-            throw new Error(result.error || 'Unknown error from OpenAI API');
+            const err = new Error(result.error || 'Unknown error from OpenAI API');
+            err.code = 'OPENAI_PROXY_ERROR';
+            throw err;
         }
-        
+
         return result.data.response;
     }
     
@@ -960,6 +1036,61 @@ class DOMRenderer {
             <body>
                 ${content}
                 <script>
+                    // Media loading fallbacks
+                    const createPlaceholder = (label) => {
+                        const svg =
+                            '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="300">' +
+                            '<rect width="100%" height="100%" fill="#f1f1f1" />' +
+                            '<text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#666" font-family="Arial" font-size="20">' +
+                            String(label) +
+                            '</text>' +
+                            '</svg>';
+                        return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+                    };
+
+                    const IMG_PLACEHOLDER = createPlaceholder('Invalid image URL');
+                    const VIDEO_POSTER_PLACEHOLDER = createPlaceholder('Invalid video URL');
+
+                    const attachMediaFallbacks = () => {
+                        document.querySelectorAll('img').forEach((img) => {
+                            const currentSrc = img.getAttribute('src') || '';
+                            if (!currentSrc.trim()) {
+                                img.src = IMG_PLACEHOLDER;
+                            }
+
+                            img.addEventListener('error', () => {
+                                img.src = IMG_PLACEHOLDER;
+                            }, { once: true });
+
+                            // If the image already errored before we attached listeners
+                            if (img.complete && img.naturalWidth === 0) {
+                                img.src = IMG_PLACEHOLDER;
+                            }
+                        });
+
+                        document.querySelectorAll('video').forEach((video) => {
+                            if (!video.hasAttribute('controls')) {
+                                video.setAttribute('controls', '');
+                            }
+
+                            const currentSrc = video.getAttribute('src') || '';
+                            if (!currentSrc.trim()) {
+                                video.setAttribute('poster', VIDEO_POSTER_PLACEHOLDER);
+                            }
+
+                            video.addEventListener('error', () => {
+                                video.setAttribute('poster', VIDEO_POSTER_PLACEHOLDER);
+                            }, { once: true });
+
+                            // If the video already errored before we attached listeners
+                            if (video.error) {
+                                video.setAttribute('poster', VIDEO_POSTER_PLACEHOLDER);
+                            }
+                        });
+                    };
+
+                    attachMediaFallbacks();
+
                     // Communication with parent
                     window.addEventListener('click', (e) => {
                         e.preventDefault();
@@ -1056,6 +1187,11 @@ class PropertiesPanel {
         };
         this.breadcrumb = document.getElementById('element-breadcrumb');
         this.form = document.getElementById('properties-form');
+
+        this.mediaSrcGroup = this.createMediaSrcField();
+        this.mediaSrcLabel = this.mediaSrcGroup.querySelector('label');
+        this.inputs.mediaSrc = this.mediaSrcGroup.querySelector('input');
+
         this.init();
     }
 
@@ -1080,16 +1216,47 @@ class PropertiesPanel {
         });
     }
 
+    createMediaSrcField() {
+        const group = document.createElement('div');
+        group.className = 'property-group hidden';
+        group.id = 'prop-media-src-group';
+
+        const label = document.createElement('label');
+        label.textContent = 'Media URL';
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.id = 'prop-media-src';
+        input.placeholder = 'https://...';
+
+        group.appendChild(label);
+        group.appendChild(input);
+
+        const actionsEl = this.form.querySelector('.actions');
+        if (actionsEl) {
+            this.form.insertBefore(group, actionsEl);
+        } else {
+            this.form.appendChild(group);
+        }
+
+        return group;
+    }
+
     updateUI(element) {
         if (!element) {
             this.form.classList.add('hidden');
             this.breadcrumb.textContent = 'No element selected';
+            this.mediaSrcGroup.classList.add('hidden');
             return;
         }
 
         this.form.classList.remove('hidden');
         this.breadcrumb.textContent = this.getElementPath(element.id);
 
+        this.populateProperties(element);
+    }
+
+    populateProperties(element) {
         this.inputs.textContent.value = element.textContent || '';
         this.inputs.width.value = element.styles.width || '';
         this.inputs.height.value = element.styles.height || '';
@@ -1109,6 +1276,17 @@ class PropertiesPanel {
             this.inputs.textContent.parentElement.classList.remove('hidden');
         } else {
             this.inputs.textContent.parentElement.classList.add('hidden');
+        }
+
+        // Media URL for img/video elements
+        const isMedia = element.tag === 'img' || element.tag === 'video';
+        if (isMedia) {
+            this.mediaSrcGroup.classList.remove('hidden');
+            this.mediaSrcLabel.textContent = element.tag === 'img' ? 'Image URL' : 'Video URL';
+            this.inputs.mediaSrc.value = (element.attributes && element.attributes.src) ? element.attributes.src : '';
+        } else {
+            this.mediaSrcGroup.classList.add('hidden');
+            this.inputs.mediaSrc.value = '';
         }
     }
 
@@ -1141,6 +1319,9 @@ class PropertiesPanel {
         const id = this.editor.state.selectedElementId;
         if (!id) return;
 
+        const element = this.editor.state.findElementById(id);
+        if (!element) return;
+
         const updates = {
             textContent: this.inputs.textContent.value,
             styles: {
@@ -1157,6 +1338,12 @@ class PropertiesPanel {
                 borderRadius: this.inputs.borderRadius.value
             }
         };
+
+        if (element.tag === 'img' || element.tag === 'video') {
+            updates.attributes = {
+                src: this.inputs.mediaSrc.value.trim()
+            };
+        }
 
         this.editor.updateElement(id, updates, saveState);
     }
@@ -1544,12 +1731,13 @@ class Editor {
     }
 
     updateElement(id, updates, saveState = true) {
-        // Deeply update styles to avoid losing existing ones not in the updates
+        // Deeply update styles/attributes to avoid losing existing ones not in the updates
         const element = this.state.findElementById(id);
         if (element) {
             if (saveState) this.state.saveState();
             
             if (updates.textContent !== undefined) element.textContent = updates.textContent;
+
             if (updates.styles) {
                 Object.entries(updates.styles).forEach(([k, v]) => {
                     if (v === '' || v === null) {
@@ -1559,6 +1747,18 @@ class Editor {
                     }
                 });
             }
+
+            if (updates.attributes) {
+                if (!element.attributes) element.attributes = {};
+                Object.entries(updates.attributes).forEach(([k, v]) => {
+                    if (v === '' || v === null || v === undefined) {
+                        delete element.attributes[k];
+                    } else {
+                        element.attributes[k] = v;
+                    }
+                });
+            }
+
             this.canvas.render(this.state);
         }
     }
