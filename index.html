@@ -24,6 +24,8 @@
                 <button id="btn-clear">Clear Canvas</button>
             </div>
             <div class="toolbar-right">
+                <button id="btn-export" title="Export HTML">Export</button>
+                <button id="btn-settings" title="Settings">Settings</button>
                 <button id="btn-add-element">Add Element</button>
                 <div class="view-options">
                     <button id="view-desktop" class="active">Desktop</button>
@@ -221,6 +223,83 @@
                 <div class="modal-body">
                     <!-- Categories will be replicated here or handled via JS -->
                     <div id="modal-element-library"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal hidden">
+            <div class="modal-content settings-modal-content">
+                <div class="modal-header">
+                    <h3>Settings</h3>
+                    <span class="close-settings-modal">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <form id="settings-form">
+                        <div class="property-group">
+                            <label for="settings-api-key">API Key</label>
+                            <div class="password-input-wrapper">
+                                <input type="password" id="settings-api-key" placeholder="Enter your API key" autocomplete="off">
+                                <button type="button" class="toggle-password" title="Show/Hide API Key">Show</button>
+                            </div>
+                            <small class="help-text">Stored in browser only (localStorage)</small>
+                        </div>
+
+                        <div class="property-group">
+                            <label for="settings-model">Model</label>
+                            <select id="settings-model">
+                                <option value="gpt-4o-mini">gpt-4o-mini</option>
+                                <option value="gpt-4">gpt-4</option>
+                                <option value="gpt-4-turbo">gpt-4-turbo</option>
+                            </select>
+                        </div>
+
+                        <div class="property-group">
+                            <label for="settings-max-tokens">Max Tokens (100-4000)</label>
+                            <input type="number" id="settings-max-tokens" min="100" max="4000" value="2000">
+                            <span class="validation-error" id="error-max-tokens"></span>
+                        </div>
+
+                        <div class="property-group">
+                            <label for="settings-temperature">Temperature (0-2)</label>
+                            <input type="number" id="settings-temperature" min="0" max="2" step="0.1" value="0.7">
+                            <span class="validation-error" id="error-temperature"></span>
+                        </div>
+
+                        <div class="property-group">
+                            <label for="settings-system-prompt">System Prompt (max 5000 chars)</label>
+                            <textarea id="settings-system-prompt" rows="6" maxlength="5000" placeholder="Enter custom system prompt..."></textarea>
+                            <small class="help-text char-count" id="settings-prompt-count">0 / 5000</small>
+                        </div>
+
+                        <div id="settings-status" class="settings-status hidden"></div>
+
+                        <div class="modal-actions">
+                            <button type="button" id="btn-save-settings" class="btn-primary">Save Settings</button>
+                            <button type="button" id="btn-cancel-settings">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Export Dialog -->
+        <div id="export-modal" class="modal hidden">
+            <div class="modal-content export-modal-content">
+                <div class="modal-header">
+                    <h3>Export HTML</h3>
+                    <span class="close-export-modal">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="property-group">
+                        <label for="export-filename">Filename</label>
+                        <input type="text" id="export-filename" value="project.html" placeholder="project.html">
+                        <small class="help-text">Include .html extension</small>
+                    </div>
+                    <div class="modal-actions">
+                        <button type="button" id="btn-confirm-export" class="btn-primary">Download</button>
+                        <button type="button" id="btn-cancel-export">Cancel</button>
+                    </div>
                 </div>
             </div>
         </div>

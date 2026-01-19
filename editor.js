@@ -2,6 +2,239 @@
  * VD-Visual-Editor Core
  */
 
+class Settings {
+    constructor() {
+        this.apiKeyStorageKey = 'vdve_apiKey';
+        this.defaults = {
+            model: 'gpt-4o-mini',
+            maxTokens: 2000,
+            temperature: 0.7,
+            systemPrompt: ''
+        };
+        this.allowedModels = ['gpt-4o-mini', 'gpt-4', 'gpt-4-turbo'];
+    }
+
+    async loadSettings() {
+        try {
+            const response = await fetch('get_settings.php', {
+                method: 'GET',
+                cache: 'no-store'
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error ${response.status}`);
+            }
+            
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to load settings');
+            }
+            
+            return result.data;
+        } catch (error) {
+            console.error('Failed to load settings:', error);
+            return this.defaults;
+        }
+    }
+
+    async saveSettings(settingsObj) {
+        try {
+            const response = await fetch('save_settings.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                cache: 'no-store',
+                body: JSON.stringify({
+                    model: settingsObj.model,
+                    maxTokens: settingsObj.maxTokens,
+                    temperature: settingsObj.temperature,
+                    systemPrompt: settingsObj.systemPrompt
+                })
+            });
+            
+            if (!response.ok) {
+                const result = await response.json();
+                throw new Error(result.error || `HTTP error ${response.status}`);
+            }
+            
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to save settings');
+            }
+            
+            return result.data || settingsObj;
+        } catch (error) {
+            throw error;
+        }
+    }
+
+    getApiKeyFromStorage() {
+        return localStorage.getItem(this.apiKeyStorageKey) || '';
+    }
+
+    setApiKeyInStorage(key) {
+        if (key) {
+            localStorage.setItem(this.apiKeyStorageKey, key);
+        } else {
+            localStorage.removeItem(this.apiKeyStorageKey);
+        }
+    }
+
+    isValidSettings(settingsObj) {
+        const apiKey = this.getApiKeyFromStorage();
+        if (!apiKey || apiKey.trim().length === 0) return false;
+        if (!settingsObj || typeof settingsObj !== 'object') return false;
+
+        const modelOk = typeof settingsObj.model === 'string' && this.allowedModels.includes(settingsObj.model);
+        const maxTokensOk = Number.isInteger(settingsObj.maxTokens) && settingsObj.maxTokens >= 100 && settingsObj.maxTokens <= 4000;
+        const tempOk = typeof settingsObj.temperature === 'number' && settingsObj.temperature >= 0 && settingsObj.temperature <= 2;
+        const promptOk = typeof settingsObj.systemPrompt === 'string' && settingsObj.systemPrompt.length <= 5000;
+
+        return modelOk && maxTokensOk && tempOk && promptOk;
+    }
+}
+
+class ExportManager {
+    constructor(editorState) {
+        this.editorState = editorState;
+    }
+
+    generateHTML() {
+        const baseCss = [
+            'html, body { margin: 0; padding: 0; height: 100%; }',
+            '* { box-sizing: border-box; }'
+        ].join('\n');
+
+        const cssRules = this.extractCSS(this.editorState.domTree);
+        const bodyHTML = this.generateBodyHTML(this.editorState.domTree);
+
+        const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exported Project</title>
+    <style>
+${baseCss}
+
+${cssRules}
+    </style>
+</head>
+<body>
+${bodyHTML}
+</body>
+</html>`;
+
+        return this.formatHTML(html);
+    }
+
+    normalizeStyleKey(key) {
+        if (!key) return key;
+        if (key.includes('-')) return key;
+        return key.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`);
+    }
+
+    extractCSS(node, cssMap = new Map()) {
+        if (node.id && node.styles && Object.keys(node.styles).length > 0) {
+            const selector = `#${node.id}`;
+            const rules = Object.entries(node.styles)
+                .map(([k, v]) => `    ${this.normalizeStyleKey(k)}: ${v};`)
+                .join('\n');
+            cssMap.set(selector, rules);
+        }
+        
+        if (node.children) {
+            node.children.forEach(child => this.extractCSS(child, cssMap));
+        }
+        
+        if (cssMap.size === 0) {
+            return '';
+        }
+        
+        const cssLines = [];
+        for (const [selector, rules] of cssMap) {
+            cssLines.push(`${selector} {\n${rules}\n}`);
+        }
+        
+        return cssLines.join('\n\n');
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    escapeAttr(text) {
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    generateBodyHTML(node, indent = 0) {
+        const spaces = '    '.repeat(indent);
+        const tag = node.tag;
+        const selfClosing = ['img', 'br', 'hr', 'input'].includes(tag);
+        
+        let attrString = '';
+        if (node.id) {
+            attrString += ` id="${this.escapeAttr(node.id)}"`;
+        }
+        if (node.classes && node.classes.length > 0) {
+            attrString += ` class="${this.escapeAttr(node.classes.join(' '))}"`;
+        }
+        if (node.attributes) {
+            for (const [k, v] of Object.entries(node.attributes)) {
+                if (v === undefined || v === null) continue;
+                attrString += ` ${k}="${this.escapeAttr(String(v))}"`;
+            }
+        }
+
+        let html = `${spaces}<${tag}${attrString}`;
+
+        if (selfClosing) {
+            html += ' />';
+        } else {
+            html += '>';
+
+            if (node.textContent) {
+                html += this.escapeHtml(node.textContent);
+            }
+
+            if (node.children && node.children.length > 0) {
+                html += '\n';
+                node.children.forEach(child => {
+                    html += this.generateBodyHTML(child, indent + 1) + '\n';
+                });
+                html += spaces;
+            }
+
+            html += `</${tag}>`;
+        }
+
+        return html;
+    }
+
+    formatHTML(htmlString) {
+        return htmlString;
+    }
+
+    downloadFile(htmlString, filename) {
+        const blob = new Blob([htmlString], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+}
+
 class EditorState {
     constructor() {
         this.domTree = {
@@ -117,9 +350,15 @@ class EditorState {
 }
 
 class DOMRenderer {
+    static normalizeStyleKey(key) {
+        if (!key) return key;
+        if (key.includes('-')) return key;
+        return key.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`);
+    }
+
     static renderToHTML(node, isSelectedId) {
         const styleString = Object.entries(node.styles || {})
-            .map(([k, v]) => `${k}:${v}`)
+            .map(([k, v]) => `${DOMRenderer.normalizeStyleKey(k)}:${v}`)
             .join(';');
         
         const classString = [...(node.classes || []), isSelectedId === node.id ? 'selected-element-highlight' : ''].join(' ').trim();
@@ -416,11 +655,16 @@ class Editor {
         this.canvas = new Canvas(this);
         this.library = new ElementLibrary(this);
         this.propertiesPanel = new PropertiesPanel(this);
+        this.settings = new Settings();
+        this.exportManager = new ExportManager(this.state);
         this.init();
     }
 
     init() {
         this.canvas.render(this.state);
+        
+        this.initSettings();
+        this.initExport();
         
         // Toolbar events
         document.getElementById('btn-undo').addEventListener('click', () => this.undo());
@@ -475,6 +719,226 @@ class Editor {
         document.getElementById('view-mobile').addEventListener('click', (e) => {
             previewContainer.style.width = '375px';
             this.setActiveView(e.target);
+        });
+    }
+
+    async initSettings() {
+        const modal = document.getElementById('settings-modal');
+        const btnSettings = document.getElementById('btn-settings');
+        const closeModal = document.querySelector('.close-settings-modal');
+        const btnSave = document.getElementById('btn-save-settings');
+        const btnCancel = document.getElementById('btn-cancel-settings');
+
+        const apiKeyInput = document.getElementById('settings-api-key');
+        const modelSelect = document.getElementById('settings-model');
+        const maxTokensInput = document.getElementById('settings-max-tokens');
+        const temperatureInput = document.getElementById('settings-temperature');
+        const systemPromptTextarea = document.getElementById('settings-system-prompt');
+        const statusDiv = document.getElementById('settings-status');
+        const charCountSpan = document.getElementById('settings-prompt-count');
+        const togglePassword = document.querySelector('.toggle-password');
+
+        const errorMaxTokens = document.getElementById('error-max-tokens');
+        const errorTemperature = document.getElementById('error-temperature');
+
+        togglePassword.addEventListener('click', () => {
+            const type = apiKeyInput.type === 'password' ? 'text' : 'password';
+            apiKeyInput.type = type;
+            togglePassword.textContent = type === 'password' ? 'Show' : 'Hide';
+        });
+
+        const validateForm = () => {
+            const maxTokens = parseInt(maxTokensInput.value);
+            const temperature = parseFloat(temperatureInput.value);
+            const systemPrompt = systemPromptTextarea.value;
+
+            let isValid = true;
+
+            if (!this.settings.allowedModels.includes(modelSelect.value)) {
+                modelSelect.classList.add('invalid');
+                isValid = false;
+            } else {
+                modelSelect.classList.remove('invalid');
+            }
+
+            if (isNaN(maxTokens) || maxTokens < 100 || maxTokens > 4000) {
+                maxTokensInput.classList.add('invalid');
+                errorMaxTokens.textContent = 'Must be between 100 and 4000';
+                isValid = false;
+            } else {
+                maxTokensInput.classList.remove('invalid');
+                errorMaxTokens.textContent = '';
+            }
+
+            if (isNaN(temperature) || temperature < 0 || temperature > 2) {
+                temperatureInput.classList.add('invalid');
+                errorTemperature.textContent = 'Must be between 0 and 2';
+                isValid = false;
+            } else {
+                temperatureInput.classList.remove('invalid');
+                errorTemperature.textContent = '';
+            }
+
+            if (systemPrompt.length > 5000) {
+                systemPromptTextarea.classList.add('invalid');
+                isValid = false;
+            } else {
+                systemPromptTextarea.classList.remove('invalid');
+            }
+
+            btnSave.disabled = !isValid;
+            return isValid;
+        };
+
+        const updatePromptCount = () => {
+            const length = systemPromptTextarea.value.length;
+            charCountSpan.textContent = `${length} / 5000`;
+        };
+
+        const onAnyChange = () => {
+            statusDiv.classList.add('hidden');
+            statusDiv.classList.remove('success', 'error');
+            statusDiv.textContent = '';
+            updatePromptCount();
+            validateForm();
+        };
+
+        systemPromptTextarea.addEventListener('input', onAnyChange);
+        maxTokensInput.addEventListener('input', onAnyChange);
+        temperatureInput.addEventListener('input', onAnyChange);
+        modelSelect.addEventListener('change', onAnyChange);
+
+        btnSettings.addEventListener('click', async () => {
+            statusDiv.classList.add('hidden');
+            statusDiv.classList.remove('success', 'error');
+            statusDiv.textContent = '';
+
+            const storedApiKey = this.settings.getApiKeyFromStorage();
+            apiKeyInput.value = storedApiKey;
+            apiKeyInput.type = 'password';
+            togglePassword.textContent = 'Show';
+
+            try {
+                const settings = await this.settings.loadSettings();
+                modelSelect.value = settings.model || 'gpt-4o-mini';
+                maxTokensInput.value = settings.maxTokens || 2000;
+                temperatureInput.value = settings.temperature || 0.7;
+                systemPromptTextarea.value = settings.systemPrompt || '';
+                updatePromptCount();
+                validateForm();
+            } catch (error) {
+                console.error('Error loading settings:', error);
+            }
+
+            modal.classList.remove('hidden');
+        });
+
+        const closeModalHandler = () => {
+            modal.classList.add('hidden');
+        };
+
+        closeModal.addEventListener('click', closeModalHandler);
+        btnCancel.addEventListener('click', closeModalHandler);
+
+        window.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                closeModalHandler();
+            }
+        });
+
+        btnSave.addEventListener('click', async () => {
+            statusDiv.classList.add('hidden');
+            statusDiv.classList.remove('success', 'error');
+            statusDiv.textContent = '';
+
+            const apiKey = apiKeyInput.value.trim();
+            const model = modelSelect.value;
+            const maxTokens = parseInt(maxTokensInput.value);
+            const temperature = parseFloat(temperatureInput.value);
+            const systemPrompt = systemPromptTextarea.value;
+
+            if (!validateForm()) {
+                statusDiv.textContent = 'Please fix validation errors';
+                statusDiv.classList.remove('hidden', 'success');
+                statusDiv.classList.add('error');
+                return;
+            }
+
+            btnSave.disabled = true;
+            btnSave.textContent = 'Saving...';
+
+            try {
+                await this.settings.saveSettings({
+                    model,
+                    maxTokens,
+                    temperature,
+                    systemPrompt
+                });
+
+                this.settings.setApiKeyInStorage(apiKey);
+
+                statusDiv.textContent = 'Settings saved successfully!';
+                statusDiv.classList.remove('hidden', 'error');
+                statusDiv.classList.add('success');
+
+                setTimeout(() => {
+                    closeModalHandler();
+                }, 1000);
+            } catch (error) {
+                console.error('Error saving settings:', error);
+                statusDiv.textContent = `Error: ${error.message}`;
+                statusDiv.classList.remove('hidden', 'success');
+                statusDiv.classList.add('error');
+            } finally {
+                btnSave.disabled = false;
+                btnSave.textContent = 'Save Settings';
+            }
+        });
+    }
+
+    initExport() {
+        const modal = document.getElementById('export-modal');
+        const btnExport = document.getElementById('btn-export');
+        const closeModal = document.querySelector('.close-export-modal');
+        const btnConfirm = document.getElementById('btn-confirm-export');
+        const btnCancel = document.getElementById('btn-cancel-export');
+        const filenameInput = document.getElementById('export-filename');
+
+        btnExport.addEventListener('click', () => {
+            filenameInput.value = 'project.html';
+            modal.classList.remove('hidden');
+        });
+
+        const closeModalHandler = () => {
+            modal.classList.add('hidden');
+        };
+
+        closeModal.addEventListener('click', closeModalHandler);
+        btnCancel.addEventListener('click', closeModalHandler);
+
+        window.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                closeModalHandler();
+            }
+        });
+
+        btnConfirm.addEventListener('click', () => {
+            let filename = filenameInput.value.trim();
+            if (!filename) {
+                filename = 'project.html';
+            }
+            if (!filename.endsWith('.html')) {
+                filename += '.html';
+            }
+
+            try {
+                const html = this.exportManager.generateHTML();
+                this.exportManager.downloadFile(html, filename);
+                closeModalHandler();
+            } catch (error) {
+                console.error('Export failed:', error);
+                alert('Export failed: ' + error.message);
+            }
         });
     }
 
