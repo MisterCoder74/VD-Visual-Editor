@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VD-Visual-Editor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="editor-container">
+        <!-- Top Toolbar -->
+        <header id="toolbar">
+            <div class="toolbar-left">
+                <div class="logo">VD-Visual-Editor</div>
+                <nav class="menu">
+                    <button id="btn-new">New</button>
+                    <button id="btn-open">Open</button>
+                    <button id="btn-save">Save Draft</button>
+                </nav>
+            </div>
+            <div class="toolbar-center">
+                <button id="btn-undo" title="Undo (Ctrl+Z)">Undo</button>
+                <button id="btn-redo" title="Redo (Ctrl+Y)">Redo</button>
+                <button id="btn-clear">Clear Canvas</button>
+            </div>
+            <div class="toolbar-right">
+                <button id="btn-add-element">Add Element</button>
+                <div class="view-options">
+                    <button id="view-desktop" class="active">Desktop</button>
+                    <button id="view-tablet">Tablet</button>
+                    <button id="view-mobile">Mobile</button>
+                </div>
+            </div>
+        </header>
+
+        <main id="main-content">
+            <!-- Left Sidebar: Element Library -->
+            <aside id="left-sidebar">
+                <h3>Element Library</h3>
+                <div class="element-categories">
+                    <div class="category">
+                        <h4>Structuring</h4>
+                        <div class="element-list" data-category="structuring">
+                            <div class="draggable-element" data-tag="div">div</div>
+                            <div class="draggable-element" data-tag="section">section</div>
+                            <div class="draggable-element" data-tag="header">header</div>
+                            <div class="draggable-element" data-tag="footer">footer</div>
+                            <div class="draggable-element" data-tag="nav">nav</div>
+                            <div class="draggable-element" data-tag="main">main</div>
+                            <div class="draggable-element" data-tag="article">article</div>
+                            <div class="draggable-element" data-tag="aside">aside</div>
+                        </div>
+                    </div>
+                    <div class="category">
+                        <h4>Formatting</h4>
+                        <div class="element-list" data-category="formatting">
+                            <div class="draggable-element" data-tag="h1">h1</div>
+                            <div class="draggable-element" data-tag="h2">h2</div>
+                            <div class="draggable-element" data-tag="h3">h3</div>
+                            <div class="draggable-element" data-tag="h4">h4</div>
+                            <div class="draggable-element" data-tag="h5">h5</div>
+                            <div class="draggable-element" data-tag="h6">h6</div>
+                            <div class="draggable-element" data-tag="p">p</div>
+                            <div class="draggable-element" data-tag="span">span</div>
+                            <div class="draggable-element" data-tag="strong">strong</div>
+                            <div class="draggable-element" data-tag="em">em</div>
+                            <div class="draggable-element" data-tag="u">u</div>
+                            <div class="draggable-element" data-tag="code">code</div>
+                            <div class="draggable-element" data-tag="pre">pre</div>
+                            <div class="draggable-element" data-tag="blockquote">blockquote</div>
+                            <div class="draggable-element" data-tag="hr">hr</div>
+                        </div>
+                    </div>
+                    <div class="category">
+                        <h4>Media</h4>
+                        <div class="element-list" data-category="media">
+                            <div class="draggable-element" data-tag="img">img</div>
+                            <div class="draggable-element" data-tag="video">video</div>
+                            <div class="draggable-element" data-tag="audio">audio</div>
+                            <div class="draggable-element" data-tag="iframe">iframe</div>
+                        </div>
+                    </div>
+                    <div class="category">
+                        <h4>Forms & Tables</h4>
+                        <div class="element-list" data-category="forms-tables">
+                            <div class="draggable-element" data-tag="form">form</div>
+                            <div class="draggable-element" data-tag="input" data-type="text">input (text)</div>
+                            <div class="draggable-element" data-tag="input" data-type="password">input (pwd)</div>
+                            <div class="draggable-element" data-tag="input" data-type="email">input (email)</div>
+                            <div class="draggable-element" data-tag="input" data-type="checkbox">checkbox</div>
+                            <div class="draggable-element" data-tag="input" data-type="radio">radio</div>
+                            <div class="draggable-element" data-tag="button">button</div>
+                            <div class="draggable-element" data-tag="textarea">textarea</div>
+                            <div class="draggable-element" data-tag="select">select</div>
+                            <div class="draggable-element" data-tag="label">label</div>
+                            <div class="draggable-element" data-tag="ul">ul</div>
+                            <div class="draggable-element" data-tag="ol">ol</div>
+                            <div class="draggable-element" data-tag="li">li</div>
+                            <div class="draggable-element" data-tag="table">table</div>
+                            <div class="draggable-element" data-tag="tr">tr</div>
+                            <div class="draggable-element" data-tag="td">td</div>
+                            <div class="draggable-element" data-tag="th">th</div>
+                        </div>
+                    </div>
+                    <div class="category">
+                        <h4>Content</h4>
+                        <div class="element-list" data-category="content">
+                            <div class="draggable-element" data-tag="a">a</div>
+                            <div class="draggable-element" data-tag="br">br</div>
+                            <div class="draggable-element" data-tag="button">button</div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Center Canvas Area -->
+            <section id="canvas-area">
+                <div id="preview-container">
+                    <iframe id="preview-frame"></iframe>
+                </div>
+            </section>
+
+            <!-- Right Sidebar: Properties Panel -->
+            <aside id="right-sidebar">
+                <div id="properties-panel">
+                    <h3>Properties</h3>
+                    <div id="element-breadcrumb">
+                        <span>No element selected</span>
+                    </div>
+                    
+                    <div id="properties-form" class="hidden">
+                        <div class="property-group">
+                            <label>Text Content</label>
+                            <textarea id="prop-text-content"></textarea>
+                        </div>
+                        
+                        <div class="property-group">
+                            <label>Width</label>
+                            <input type="text" id="prop-width" placeholder="e.g. 100%, 200px">
+                        </div>
+                        
+                        <div class="property-group">
+                            <label>Height</label>
+                            <input type="text" id="prop-height" placeholder="e.g. auto, 200px">
+                        </div>
+
+                        <div class="property-group">
+                            <label>Padding</label>
+                            <input type="text" id="prop-padding" placeholder="e.g. 10px">
+                        </div>
+
+                        <div class="property-group">
+                            <label>Margin</label>
+                            <input type="text" id="prop-margin" placeholder="e.g. 10px">
+                        </div>
+
+                        <div class="property-group">
+                            <label>Color</label>
+                            <input type="color" id="prop-color">
+                        </div>
+
+                        <div class="property-group">
+                            <label>Background</label>
+                            <input type="text" id="prop-background" placeholder="e.g. #fff, url()">
+                        </div>
+
+                        <div class="property-group">
+                            <label>Font Size</label>
+                            <input type="text" id="prop-font-size" placeholder="e.g. 16px">
+                        </div>
+
+                        <div class="property-group">
+                            <label>Text Align</label>
+                            <select id="prop-text-align">
+                                <option value="">Default</option>
+                                <option value="left">Left</option>
+                                <option value="center">Center</option>
+                                <option value="right">Right</option>
+                                <option value="justify">Justify</option>
+                            </select>
+                        </div>
+
+                        <div class="property-group">
+                            <label>Display</label>
+                            <select id="prop-display">
+                                <option value="">Default</option>
+                                <option value="block">Block</option>
+                                <option value="inline-block">Inline Block</option>
+                                <option value="flex">Flex</option>
+                                <option value="grid">Grid</option>
+                                <option value="none">None</option>
+                            </select>
+                        </div>
+
+                        <div class="property-group">
+                            <label>Border</label>
+                            <input type="text" id="prop-border" placeholder="e.g. 1px solid #000">
+                        </div>
+
+                        <div class="property-group">
+                            <label>Border Radius</label>
+                            <input type="text" id="prop-border-radius" placeholder="e.g. 4px">
+                        </div>
+
+                        <div class="actions">
+                            <button id="btn-clone-element">Clone Element</button>
+                            <button id="btn-delete-element" class="danger">Delete Element</button>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </main>
+
+        <!-- Element Selection Modal -->
+        <div id="element-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Add Element</h3>
+                    <span class="close-modal">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <!-- Categories will be replicated here or handled via JS -->
+                    <div id="modal-element-library"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="editor.js"></script>
+</body>
+</html>
