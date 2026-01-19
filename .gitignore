@@ -1,0 +1,10 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# PHP
+composer.lock
+vendor/
+
+# Local configuration
+config.local.php
