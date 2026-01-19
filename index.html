@@ -27,6 +27,7 @@
                 <button id="btn-export" title="Export HTML">Export</button>
                 <button id="btn-settings" title="Settings">Settings</button>
                 <button id="btn-add-element">Add Element</button>
+                <button id="btn-chat-toggle" title="AI Assistant">AI Chat</button>
                 <div class="view-options">
                     <button id="view-desktop" class="active">Desktop</button>
                     <button id="view-tablet">Tablet</button>
@@ -301,6 +302,36 @@
                         <button type="button" id="btn-cancel-export">Cancel</button>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Chat Panel -->
+    <div id="chat-panel" class="chat-panel collapsed">
+        <div class="chat-header">
+            <span class="chat-title">AI Assistant</span>
+            <div class="chat-header-actions">
+                <button id="btn-collapse-chat" title="Collapse">−</button>
+                <button id="btn-close-chat" title="Close">×</button>
+            </div>
+        </div>
+        <div class="chat-messages" id="chat-messages">
+            <div class="chat-welcome">
+                <p>Hello! I'm your AI assistant. I can help you modify your canvas design. Try asking me to:</p>
+                <ul>
+                    <li>Change colors or fonts</li>
+                    <li>Add new elements</li>
+                    <li>Modify layout and spacing</li>
+                    <li>Style existing elements</li>
+                </ul>
+                <p>Example: "Make the heading blue and increase its size"</p>
+            </div>
+        </div>
+        <div class="chat-input-area">
+            <textarea id="chat-input" placeholder="Describe what you'd like to change..." maxlength="500"></textarea>
+            <div class="chat-input-footer">
+                <span class="char-counter" id="chat-char-counter">0 / 500</span>
+                <button id="btn-send-message" class="btn-primary">Send</button>
             </div>
         </div>
     </div>
